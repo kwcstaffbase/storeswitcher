@@ -1,13 +1,13 @@
 // ============================================================================
-// Store / Corporate View Switcher — production build
+// Store / Corporate View Switcher — production build (self-injected button)
 //
-// Switches a user between two Staffbase groups (which gate two content pages)
-// and redirects to the matching page.
+// Injects its own "Switch View" button, switches the user between two Staffbase
+// groups (which gate two content pages), and redirects to the matching page.
 //
-// IMPORTANT: the group IDs and page URLs below are PER-INSTANCE. The values
-// here are placeholders — set them to match whichever instance this runs on
-// (test vs. prod). BASE_URL is derived from the current origin automatically,
-// so the same file works in any environment without editing the domain.
+// IMPORTANT: group IDs and page paths are PER-INSTANCE. The values below are
+// production (thepantry) placeholders — replace them with the IDs for whichever
+// instance this runs on. BASE_URL is derived from the current origin so the same
+// file works in any environment without editing the domain.
 // ============================================================================
 
 (function () {
@@ -15,35 +15,22 @@
 
   // --- Configuration --------------------------------------------------------
   const CONFIG = {
-    // Group IDs for the instance this script is deployed on. The defaults are
-    // the production (thepantry) IDs — replace for the test instance.
-    CORP_VIEW: "68a5066cf142ff0ede176299",
-    STORE_VIEW: "684afb75ad355915e366ba44",
+    CORP_VIEW: "68a5066cf142ff0ede176299",       // <- set per instance
+    STORE_VIEW: "684afb75ad355915e366ba44",      // <- set per instance
+    CORPORATE_VIEW_PATH: "/content/page/6875bc7f51f81f3cdf86d510", // <- set per instance
+    STORE_VIEW_PATH: "/content/page/6875bcb47ddfa778d9563bf6",     // <- set per instance
 
-    // Use RELATIVE paths so redirects stay on the current instance.
-    // Replace the page IDs with the ones for this instance.
-    CORPORATE_VIEW_PATH: "/content/page/6875bc7f51f81f3cdf86d510",
-    STORE_VIEW_PATH: "/content/page/6875bcb47ddfa778d9563bf6",
-
-    // Same-origin as the page. Do NOT hardcode a domain — that breaks the
-    // moment the script runs on a different instance (test vs. prod).
     BASE_URL: window.location.origin,
+    USER_ID_ENDPOINTS: ["/api/users/me"],
 
-    // CONFIRM THIS. First candidate returning a usable id wins; DOM scrape last.
-    USER_ID_ENDPOINTS: ["/api/users/me", "/api/me"],
+    BUTTON_ID: "custom-view-switcher-btn",
+    BUTTON_LABEL: "Switch View",
 
     REQUEST_TIMEOUT_MS: 8000,
     REQUEST_RETRIES: 2,
     POLL_TIMEOUT_MS: 6000,
     POLL_INTERVAL_MS: 400,
   };
-
-  const TOGGLE_SELECTORS = [
-    'a[href="/toggle"]',
-    'a[aria-label="Switch View"]',
-    'a[href*="toggle"]',
-    'section[class*="StyledDesktopQuicklinks"] a',
-  ];
 
   let initialized = false;
   let switching = false;
@@ -89,7 +76,7 @@
     return cachedCsrf;
   }
 
-  // --- User ID resolution: API first, DOM scrape as fallback ----------------
+  // --- User ID resolution ---------------------------------------------------
   async function resolveUserId() {
     for (const endpoint of CONFIG.USER_ID_ENDPOINTS) {
       try {
@@ -102,15 +89,7 @@
         // try next candidate
       }
     }
-    const fromDom = getUserIdFromElement(document.body);
-    if (fromDom) return fromDom;
-    return getUserIdFromElement(document.querySelector('[class*="user-"]'));
-  }
-
-  function getUserIdFromElement(element) {
-    if (!element) return null;
-    const userClass = Array.from(element.classList).find((c) => c.startsWith("user-"));
-    return userClass ? userClass.split("user-")[1] : null;
+    return null;
   }
 
   // --- Group membership -----------------------------------------------------
@@ -128,8 +107,6 @@
   }
 
   async function writeMembership(method, groupId, userId) {
-    // Same-origin relative path; X-CSRF-Token is the only header we control
-    // (Origin/Referer are forbidden headers — the browser sets them itself).
     const attempt = (token) =>
       fetchWithRetry(`/api/groups/${groupId}/users/${userId}`, {
         method,
@@ -138,7 +115,6 @@
 
     let token = await getCSRFToken();
     let response = await attempt(token);
-
     if (response.status === 403) {
       token = await getCSRFToken(true);
       response = await attempt(token);
@@ -195,52 +171,67 @@
     window.location.href = CONFIG.BASE_URL + targetPath;
   }
 
-  // --- UI state -------------------------------------------------------------
-  function lockUI(link) {
-    link.dataset.switching = "true";
-    link.dataset.originalText = link.textContent;
-    link.style.pointerEvents = "none";
-    link.style.opacity = "0.6";
-    link.textContent = "Switching views...";
+  // --- Injected button ------------------------------------------------------
+  function createButton() {
+    const btn = document.createElement("button");
+    btn.id = CONFIG.BUTTON_ID;
+    btn.type = "button";
+    btn.textContent = CONFIG.BUTTON_LABEL;
+    Object.assign(btn.style, {
+      position: "fixed",
+      bottom: "24px",
+      right: "24px",
+      zIndex: "2147483647",
+      padding: "12px 20px",
+      borderRadius: "24px",
+      border: "none",
+      background: "#0067b9",
+      color: "#fff",
+      font: "600 14px/1 system-ui, sans-serif",
+      cursor: "pointer",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+    });
+    btn.addEventListener("click", onSwitchClick);
+    return btn;
   }
 
-  function restoreUI(link, message) {
-    delete link.dataset.switching;
-    link.style.pointerEvents = "auto";
-    link.style.opacity = "1";
-    link.textContent = message || link.dataset.originalText || link.textContent;
-    if (message) {
-      setTimeout(() => {
-        link.textContent = link.dataset.originalText || link.textContent;
-      }, 4000);
-    }
+  function setButtonState(btn, { disabled, text }) {
+    btn.disabled = disabled;
+    btn.style.opacity = disabled ? "0.6" : "1";
+    btn.style.cursor = disabled ? "default" : "pointer";
+    if (text !== undefined) btn.textContent = text;
   }
 
-  // --- Delegated click handler ----------------------------------------------
-  async function onToggleClick(event) {
-    const link = event.target.closest(TOGGLE_SELECTORS.join(","));
-    if (!link) return;
-
-    event.preventDefault();
+  async function onSwitchClick(event) {
+    const btn = event.currentTarget;
     if (switching) return;
     switching = true;
-    lockUI(link);
+    setButtonState(btn, { disabled: true, text: "Switching views..." });
 
     try {
-      await switchView();
+      await switchView(); // redirects on success
     } catch (err) {
       console.error("View switch failed:", err);
       switching = false;
-      restoreUI(link, "Couldn't switch — try again");
+      setButtonState(btn, { disabled: false, text: "Couldn't switch — try again" });
+      setTimeout(() => setButtonState(btn, { disabled: false, text: CONFIG.BUTTON_LABEL }), 4000);
     }
+  }
+
+  function ensureButton() {
+    if (document.getElementById(CONFIG.BUTTON_ID)) return;
+    document.body.appendChild(createButton());
   }
 
   // --- Init -----------------------------------------------------------------
   function init() {
     if (initialized) return;
     initialized = true;
-    document.addEventListener("click", onToggleClick, true);
-    console.log("Store switcher initialized (delegated). Origin:", CONFIG.BASE_URL);
+    ensureButton();
+    // Re-add the button if Staffbase's SPA navigation ever removes it.
+    const observer = new MutationObserver(() => ensureButton());
+    observer.observe(document.body, { childList: true });
+    console.log("Store switcher initialized (injected button). Origin:", CONFIG.BASE_URL);
   }
 
   if (document.readyState === "loading") {
