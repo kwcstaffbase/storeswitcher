@@ -24,7 +24,7 @@
     CORPORATE_VIEW_URL:
       "https://groceryoutlettest.staffbase.com/content/page/6a3aa87a1c15975006d8e353",
     STORE_VIEW_URL:
-      "https://groceryoutlettest.staffbase.com/content/page/6875bcb47ddfa778d9563bf6",
+      "https://groceryoutlettest.staffbase.com/content/page/6a3aac39bcd5865d24d98ae9",
     BASE_URL: "https://groceryoutlettest.staffbase.com",
 
     // CONFIRM THIS. Staffbase commonly exposes the current user at /api/users/me.
