@@ -17,8 +17,8 @@
   const CONFIG = {
     CORP_VIEW: "6a3aa2f21c15975006d878d4",       // <- set per instance
     STORE_VIEW: "6a3aa2f2198c905e682c0fc9",      // <- set per instance
-    CORPORATE_VIEW_PATH: "/content/page/6875bc7f51f81f3cdf86d510", // <- set per instance
-    STORE_VIEW_PATH: "/content/page/6875bcb47ddfa778d9563bf6",     // <- set per instance
+    CORPORATE_VIEW_PATH: "/content/page/6a3aac39bcd5865d24d98ae9", // <- set per instance
+    STORE_VIEW_PATH: "/content/page/6a3aa87a1c15975006d8e353",     // <- set per instance
 
     BASE_URL: window.location.origin,
     USER_ID_ENDPOINTS: ["/api/users/me"],
