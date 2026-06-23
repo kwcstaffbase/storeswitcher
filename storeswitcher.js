@@ -19,13 +19,13 @@
 
   // --- Configuration --------------------------------------------------------
   const CONFIG = {
-    CORP_VIEW: "68a5066cf142ff0ede176299",
-    STORE_VIEW: "684afb75ad355915e366ba44",
+    CORP_VIEW: "6a3aa2f21c15975006d878d4",
+    STORE_VIEW: "6a3aa2f2198c905e682c0fc9",
     CORPORATE_VIEW_URL:
-      "https://thepantry.groceryoutlet.com/content/page/6875bc7f51f81f3cdf86d510",
+      "https://groceryoutlettest.staffbase.com/content/page/6a3aa87a1c15975006d8e353",
     STORE_VIEW_URL:
-      "https://thepantry.groceryoutlet.com/content/page/6875bcb47ddfa778d9563bf6",
-    BASE_URL: "https://thepantry.groceryoutlet.com",
+      "https://groceryoutlettest.staffbase.com/content/page/6875bcb47ddfa778d9563bf6",
+    BASE_URL: "https://groceryoutlettest.staffbase.com",
 
     // CONFIRM THIS. Staffbase commonly exposes the current user at /api/users/me.
     // The first candidate that returns a usable id wins; DOM scrape is the last resort.
