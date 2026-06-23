@@ -15,8 +15,8 @@
 
   // --- Configuration --------------------------------------------------------
   const CONFIG = {
-    CORP_VIEW: "68a5066cf142ff0ede176299",       // <- set per instance
-    STORE_VIEW: "684afb75ad355915e366ba44",      // <- set per instance
+    CORP_VIEW: "6a3aa2f21c15975006d878d4",       // <- set per instance
+    STORE_VIEW: "6a3aa2f2198c905e682c0fc9",      // <- set per instance
     CORPORATE_VIEW_PATH: "/content/page/6875bc7f51f81f3cdf86d510", // <- set per instance
     STORE_VIEW_PATH: "/content/page/6875bcb47ddfa778d9563bf6",     // <- set per instance
 
