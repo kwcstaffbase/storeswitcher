@@ -4,14 +4,10 @@
 // Switches a user between two Staffbase groups (which gate two content pages)
 // and redirects to the matching page.
 //
-// Hardening vs. prior versions:
-//   - Add-to-target BEFORE remove-from-source (no "orphaned in neither group")
-//   - Polls membership for propagation instead of a fixed delay
-//   - Resolves user ID from the Staffbase API, DOM scrape only as fallback
-//   - Delegated listener + init guard (survives SPA re-renders, never double-binds)
-//   - Per-request timeout + retry on transient failures
-//   - CSRF refresh-and-retry on 403
-//   - User-facing error state, not just console logs
+// IMPORTANT: the group IDs and page URLs below are PER-INSTANCE. The values
+// here are placeholders — set them to match whichever instance this runs on
+// (test vs. prod). BASE_URL is derived from the current origin automatically,
+// so the same file works in any environment without editing the domain.
 // ============================================================================
 
 (function () {
@@ -19,16 +15,21 @@
 
   // --- Configuration --------------------------------------------------------
   const CONFIG = {
-    CORP_VIEW: "6a3aa2f21c15975006d878d4",
-    STORE_VIEW: "6a3aa2f2198c905e682c0fc9",
-    CORPORATE_VIEW_URL:
-      "https://groceryoutlettest.staffbase.com/content/page/6a3aa87a1c15975006d8e353",
-    STORE_VIEW_URL:
-      "https://groceryoutlettest.staffbase.com/content/page/6a3aac39bcd5865d24d98ae9",
-    BASE_URL: "https://groceryoutlettest.staffbase.com",
+    // Group IDs for the instance this script is deployed on. The defaults are
+    // the production (thepantry) IDs — replace for the test instance.
+    CORP_VIEW: "68a5066cf142ff0ede176299",
+    STORE_VIEW: "684afb75ad355915e366ba44",
 
-    // CONFIRM THIS. Staffbase commonly exposes the current user at /api/users/me.
-    // The first candidate that returns a usable id wins; DOM scrape is the last resort.
+    // Use RELATIVE paths so redirects stay on the current instance.
+    // Replace the page IDs with the ones for this instance.
+    CORPORATE_VIEW_PATH: "/content/page/6875bc7f51f81f3cdf86d510",
+    STORE_VIEW_PATH: "/content/page/6875bcb47ddfa778d9563bf6",
+
+    // Same-origin as the page. Do NOT hardcode a domain — that breaks the
+    // moment the script runs on a different instance (test vs. prod).
+    BASE_URL: window.location.origin,
+
+    // CONFIRM THIS. First candidate returning a usable id wins; DOM scrape last.
     USER_ID_ENDPOINTS: ["/api/users/me", "/api/me"],
 
     REQUEST_TIMEOUT_MS: 8000,
@@ -56,7 +57,6 @@
       try {
         const response = await fetch(url, { ...options, signal: controller.signal });
         clearTimeout(timer);
-        // Retry only on server errors; client errors (incl. 403) are handled by caller.
         if (response.status >= 500 && attempt < retries) {
           await delay(300 * (attempt + 1));
           continue;
@@ -123,25 +123,22 @@
       return response.ok;
     } catch (err) {
       console.error("Membership check failed:", err);
-      return false; // treat unknown as "not in group" — caller's add step is idempotent
+      return false;
     }
   }
 
   async function writeMembership(method, groupId, userId) {
-    const attempt = async (token) =>
-      fetchWithRetry(`${CONFIG.BASE_URL}/api/groups/${groupId}/users/${userId}`, {
+    // Same-origin relative path; X-CSRF-Token is the only header we control
+    // (Origin/Referer are forbidden headers — the browser sets them itself).
+    const attempt = (token) =>
+      fetchWithRetry(`/api/groups/${groupId}/users/${userId}`, {
         method,
-        headers: {
-          "X-CSRF-Token": token,
-          Origin: CONFIG.BASE_URL,
-          Referer: window.location.href,
-        },
+        headers: { "X-CSRF-Token": token },
       });
 
     let token = await getCSRFToken();
     let response = await attempt(token);
 
-    // Stale token -> refresh once and retry.
     if (response.status === 403) {
       token = await getCSRFToken(true);
       response = await attempt(token);
@@ -152,7 +149,6 @@
   const addToGroup = (groupId, userId) => writeMembership("POST", groupId, userId);
   const removeFromGroup = (groupId, userId) => writeMembership("DELETE", groupId, userId);
 
-  // Poll until membership reflects the expected state, or timeout.
   async function pollMembership(groupId, userId, expected) {
     const deadline = Date.now() + CONFIG.POLL_TIMEOUT_MS;
     while (Date.now() < deadline) {
@@ -163,47 +159,40 @@
   }
 
   // --- Core switch ----------------------------------------------------------
-  async function switchView(linkEl) {
+  async function switchView() {
     const userId = await resolveUserId();
     if (!userId) throw new Error("Could not resolve user ID");
 
     const inCorp = await isInGroup(CONFIG.CORP_VIEW, userId);
     const inStore = await isInGroup(CONFIG.STORE_VIEW, userId);
 
-    // Precedence: if somehow in both, treat Corporate as current and switch to Store.
-    // If in neither, default to Corporate.
-    let source, target, targetUrl;
+    let source, target, targetPath;
     if (inCorp) {
       source = CONFIG.CORP_VIEW;
       target = CONFIG.STORE_VIEW;
-      targetUrl = CONFIG.STORE_VIEW_URL;
+      targetPath = CONFIG.STORE_VIEW_PATH;
     } else if (inStore) {
       source = CONFIG.STORE_VIEW;
       target = CONFIG.CORP_VIEW;
-      targetUrl = CONFIG.CORPORATE_VIEW_URL;
+      targetPath = CONFIG.CORPORATE_VIEW_PATH;
     } else {
       source = null;
       target = CONFIG.CORP_VIEW;
-      targetUrl = CONFIG.CORPORATE_VIEW_URL;
+      targetPath = CONFIG.CORPORATE_VIEW_PATH;
     }
 
-    // 1. Add to target FIRST. If this fails, user is untouched — safe to abort.
+    // Add to target FIRST so a failure leaves the user untouched, not orphaned.
     if (!(await addToGroup(target, userId))) {
       throw new Error("Failed to add user to target group");
     }
-
-    // 2. Confirm propagation before relying on the new membership.
     if (!(await pollMembership(target, userId, true))) {
       throw new Error("Target membership did not propagate in time");
     }
-
-    // 3. Remove from source. If this fails the user is in BOTH groups —
-    //    degraded but not broken; the target page gates on target membership.
     if (source && !(await removeFromGroup(source, userId))) {
       console.warn("Failed to remove from source group; user is in both groups.");
     }
 
-    window.location.href = targetUrl;
+    window.location.href = CONFIG.BASE_URL + targetPath;
   }
 
   // --- UI state -------------------------------------------------------------
@@ -238,8 +227,7 @@
     lockUI(link);
 
     try {
-      await switchView(link);
-      // On success the page redirects; no UI restore needed.
+      await switchView();
     } catch (err) {
       console.error("View switch failed:", err);
       switching = false;
@@ -251,9 +239,8 @@
   function init() {
     if (initialized) return;
     initialized = true;
-    // Delegation on document survives Staffbase SPA re-rendering the quicklink.
     document.addEventListener("click", onToggleClick, true);
-    console.log("Store switcher initialized (delegated).");
+    console.log("Store switcher initialized (delegated). Origin:", CONFIG.BASE_URL);
   }
 
   if (document.readyState === "loading") {
