@@ -1,13 +1,17 @@
 // ============================================================================
-// Store / Corporate View Switcher — production build (self-injected button)
+// Store / Corporate View Switcher — production build
 //
-// Injects its own "Switch View" button, switches the user between two Staffbase
-// groups (which gate two content pages), and redirects to the matching page.
+// Binds to the platform's existing "Switch View" control (header quicklink),
+// switches the user between two Staffbase groups (which gate two content
+// pages), and redirects to the matching page.
 //
-// IMPORTANT: group IDs and page paths are PER-INSTANCE. The values below are
-// production (thepantry) placeholders — replace them with the IDs for whichever
-// instance this runs on. BASE_URL is derived from the current origin so the same
-// file works in any environment without editing the domain.
+// Trigger: a delegated capture-phase click listener matches the native
+// "Switch View" control by aria-label, link text, or a /toggle href, so it
+// survives Staffbase's SPA re-rendering the header.
+//
+// IMPORTANT: group IDs and page paths are PER-INSTANCE — set them below.
+// Access is gated by each group's accessors; ensure both groups list each
+// other as accessors so members of either can switch both ways.
 // ============================================================================
 
 (function () {
@@ -15,16 +19,13 @@
 
   // --- Configuration --------------------------------------------------------
   const CONFIG = {
-    CORP_VIEW: "68a5066cf142ff0ede176299",       // <- set per instance
-    STORE_VIEW: "684afb75ad355915e366ba44",      // <- set per instance
-    CORPORATE_VIEW_PATH: "/content/page/6875bc7f51f81f3cdf86d510", // <- set per instance
-    STORE_VIEW_PATH: "/content/page/6875bcb47ddfa778d9563bf6",     // <- set per instance
+    CORP_VIEW: "6a3aa2f21c15975006d878d4",
+    STORE_VIEW: "6a3aa2f2198c905e682c0fc9",
+    CORPORATE_VIEW_PATH: "/content/page/6875bc7f51f81f3cdf86d510",
+    STORE_VIEW_PATH: "/content/page/6875bcb47ddfa778d9563bf6",
 
     BASE_URL: window.location.origin,
     USER_ID_ENDPOINTS: ["/api/users/me"],
-
-    BUTTON_ID: "custom-view-switcher-btn",
-    BUTTON_LABEL: "Switch View",
 
     REQUEST_TIMEOUT_MS: 8000,
     REQUEST_RETRIES: 2,
@@ -171,67 +172,66 @@
     window.location.href = CONFIG.BASE_URL + targetPath;
   }
 
-  // --- Injected button ------------------------------------------------------
-  function createButton() {
-    const btn = document.createElement("button");
-    btn.id = CONFIG.BUTTON_ID;
-    btn.type = "button";
-    btn.textContent = CONFIG.BUTTON_LABEL;
-    Object.assign(btn.style, {
-      position: "fixed",
-      bottom: "24px",
-      right: "24px",
-      zIndex: "2147483647",
-      padding: "12px 20px",
-      borderRadius: "24px",
-      border: "none",
-      background: "#0067b9",
-      color: "#fff",
-      font: "600 14px/1 system-ui, sans-serif",
-      cursor: "pointer",
-      boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-    });
-    btn.addEventListener("click", onSwitchClick);
-    return btn;
+  // --- Locate the native "Switch View" control from a click target ----------
+  function findSwitchControl(start) {
+    if (!start || !start.closest) return null;
+
+    // CSS-matchable signals: aria-label or a /toggle href.
+    const bySelector = start.closest(
+      '[aria-label*="switch view" i], a[href="/toggle"], a[href*="toggle"]',
+    );
+    if (bySelector) return bySelector;
+
+    // Text-based fallback: climb a few ancestors looking for a clickable
+    // element whose label reads "Switch View".
+    let el = start;
+    for (let i = 0; i < 6 && el; i++, el = el.parentElement) {
+      const clickable =
+        el.tagName === "A" ||
+        el.tagName === "BUTTON" ||
+        el.getAttribute?.("role") === "button";
+      if (clickable && (el.textContent || "").trim().toLowerCase() === "switch view") {
+        return el;
+      }
+    }
+    return null;
   }
 
-  function setButtonState(btn, { disabled, text }) {
-    btn.disabled = disabled;
-    btn.style.opacity = disabled ? "0.6" : "1";
-    btn.style.cursor = disabled ? "default" : "pointer";
-    if (text !== undefined) btn.textContent = text;
-  }
+  // --- Delegated click handler ----------------------------------------------
+  async function onToggleClick(event) {
+    const control = findSwitchControl(event.target);
+    if (!control) return;
 
-  async function onSwitchClick(event) {
-    const btn = event.currentTarget;
+    // Intercept before the platform's own navigation runs.
+    event.preventDefault();
+    event.stopPropagation();
+
     if (switching) return;
     switching = true;
-    setButtonState(btn, { disabled: true, text: "Switching views..." });
+
+    // Light, non-destructive loading state (don't touch innerHTML — preserves icons).
+    const prevOpacity = control.style.opacity;
+    const prevPE = control.style.pointerEvents;
+    control.style.opacity = "0.6";
+    control.style.pointerEvents = "none";
 
     try {
       await switchView(); // redirects on success
     } catch (err) {
       console.error("View switch failed:", err);
       switching = false;
-      setButtonState(btn, { disabled: false, text: "Couldn't switch — try again" });
-      setTimeout(() => setButtonState(btn, { disabled: false, text: CONFIG.BUTTON_LABEL }), 4000);
+      control.style.opacity = prevOpacity;
+      control.style.pointerEvents = prevPE;
     }
-  }
-
-  function ensureButton() {
-    if (document.getElementById(CONFIG.BUTTON_ID)) return;
-    document.body.appendChild(createButton());
   }
 
   // --- Init -----------------------------------------------------------------
   function init() {
     if (initialized) return;
     initialized = true;
-    ensureButton();
-    // Re-add the button if Staffbase's SPA navigation ever removes it.
-    const observer = new MutationObserver(() => ensureButton());
-    observer.observe(document.body, { childList: true });
-    console.log("Store switcher initialized (injected button). Origin:", CONFIG.BASE_URL);
+    // Capture phase + delegation: catches the native control even after re-render.
+    document.addEventListener("click", onToggleClick, true);
+    console.log("Store switcher initialized (bound to native Switch View control).");
   }
 
   if (document.readyState === "loading") {
